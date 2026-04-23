@@ -1,0 +1,12 @@
+# MuJoCo physics simulator
+mujoco==3.2.3
+
+# Numerical computing
+numpy==1.24.4
+
+# # Scientific computing
+scipy==1.10.1
+
+# Plotting and visualization
+matplotlib==3.7.5
+
