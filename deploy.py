@@ -18,28 +18,25 @@ xml_path = os.path.join(current_dir, "ur10e", "ur10e_custom_gripper_scene.xml")
 
 # Control parameters
 TIME_STEP = 0.002
-KP_JOINTS = np.array([300, 250, 90, 100, 70, 100])
-KD_JOINTS = np.array([5.0, 40.0, 35.0, 40.0, 5.0, 3.5])
+KP_JOINTS = np.array([300, 250, 90, 100, 70, 100])   # Proportional gains per joint (reduced for smoother motion)
+KD_JOINTS = np.array([5.0, 40.0, 35.0, 40.0, 5.0, 3.5])  
+KP_GRIPPER = 50.0  # Proportional gain for gripper (increased for stronger grip)
+KD_GRIPPER = 5.0   # Derivative gain for gripper (increased for stability)
 
 # Initial and target joint positions (6 DOF for arm)
 initial_qpos = np.array([-1.5708, -2.0708, 1.2708, -2.0, 1.5708, 0.0])
 
-# End-effector frame used for IK
-IK_SITE_NAME = "gripperframe"
+# Cup position (where we want to pick it up)
+CUP_POS = np.array([0.95, 0.05, 0.11])  # Center of cup wall at mid-height - closer to robot
 
-# Cup geometry (from XML)
-CUP_BODY_NAME = "solo_cup"
-CUP_CENTER_Z_OFFSET = 0.035
-CUP_RADIUS = 0.035
-
-# Side approach tuning (meters)
-SIDE_PREGRASP_GAP = 0.055
-SIDE_GRASP_DEPTH = 0.004
-LIFT_HEIGHT = 0.16
+# Gripper finger offset - adjust to position cup between fingers
+# The gripper's moving jaw is offset, so we need to compensate to center the cup
+GRIPPER_FINGER_OFFSET = np.array([0.06, -0.13, 0.0])  # Y-offset to center cup between fingers
+GRIPPER_TARGET_POS = CUP_POS + GRIPPER_FINGER_OFFSET  # Target position for gripper approach
 
 # Gripper positions (radians)
 GRIPPER_OPEN = 1.5   # Open position (minimum)
-GRIPPER_CLOSED = 0.6      # Closed position - more squeeze
+GRIPPER_CLOSED = 0.2      # Closed position - tight grip
 
 
 def pd_control(desired_qpos, current_qpos, current_qvel, kp, kd):
@@ -66,189 +63,145 @@ def interpolate_qpos(initial, target, alpha):
     return initial + alpha * (target - initial)
 
 
-def normalize(vec):
-    """Return a unit vector, preserving zeros."""
-    nrm = np.linalg.norm(vec)
-    if nrm < 1e-8:
-        return vec.copy()
-    return vec / nrm
-
-
-def compute_side_grasp_pose(model, data):
-    """
-    Compute a side-approach grasp pose.
-
-    We project the initial cup-to-end-effector vector to XY and use it as the
-    horizontal approach direction so the gripper comes from the side (not top-down).
-    """
-    cup_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, CUP_BODY_NAME)
-    ee_site_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, IK_SITE_NAME)
-
-    cup_body_pos = data.xpos[cup_id].copy()
-    ee_pos = data.site_xpos[ee_site_id].copy()
-    cup_center = cup_body_pos + np.array([0.0, 0.0, CUP_CENTER_Z_OFFSET])
-
-    side_vec_xy = ee_pos[:2] - cup_center[:2]
-    side_dist = np.linalg.norm(side_vec_xy)
-    if side_dist < 1e-6:
-        side_xy = np.array([1.0, 0.0])
-    else:
-        side_xy = side_vec_xy / side_dist
-
-    approach_axis = np.array([side_xy[0], side_xy[1], 0.0])
-    world_up = np.array([0.0, 0.0, 1.0])
-
-    z_axis = normalize(approach_axis)
-    x_axis = normalize(np.cross(world_up, z_axis))
-    y_axis = normalize(np.cross(z_axis, x_axis))
-
-    target_rot = np.column_stack([x_axis, y_axis, z_axis])
-    base_yaw = np.arctan2(approach_axis[1], approach_axis[0])
-    base_dist = np.linalg.norm(cup_center[:2])
-
-    return cup_center, target_rot, z_axis, base_dist, base_yaw
-
-
-def compute_planar_seed(cup_center, radial_dist, base_yaw):
-    """Compute a geometric seed for the first 3 joints from base-to-cup distance."""
-    shoulder_height = 0.181
-    shoulder_radius_offset = 0.176
-    link_1 = 0.613
-    link_2 = 0.571
-
-    z = cup_center[2] - shoulder_height
-    radial_eff = max(0.05, radial_dist - shoulder_radius_offset)
-    reach = np.sqrt(radial_eff**2 + z**2)
-    reach = np.clip(reach, 0.05, link_1 + link_2 - 1e-4)
-
-    cos_elbow = np.clip((reach**2 - link_1**2 - link_2**2) / (2.0 * link_1 * link_2), -1.0, 1.0)
-    elbow_inner = np.arccos(cos_elbow)
-
-    shoulder_line = np.arctan2(z, radial_eff)
-    shoulder_offset = np.arctan2(link_2 * np.sin(elbow_inner), link_1 + link_2 * np.cos(elbow_inner))
-
-    q1 = base_yaw
-    q2 = shoulder_line - shoulder_offset - np.pi / 2.0
-    q3 = np.pi / 2.0 - elbow_inner
-
-    return np.array([q1, q2, q3, -1.7, 1.57, 0.0])
-
-
-def solve_pose_ik(model, data, target_pos, target_rot, initial_guess):
-    """Solve orientation-constrained IK for a site pose."""
-    data.qpos[:6] = initial_guess
-    mj.mj_forward(model, data)
-
-    solver = IKSolver(model, data, n_dof=6, verbose=False)
-    result = solver.solve_ik(
-        target_pos=target_pos,
-        target_rot_matrix=target_rot,
-        site_name=IK_SITE_NAME,
-        rot_weight=0.3,
-        max_steps=8000,
-        tol=5e-5,
-        regularization_strength=2e-2,
-        regularization_threshold=0.08,
-        progress_thresh=50.0,
-        max_update_norm=0.25,
-        progress_check_delay=20,
-    )
-    return result["qpos"][:6], result["err_norm"], result["success"]
-
-
 def main():
     model = mj.MjModel.from_xml_path(xml_path)
     data = mj.MjData(model)
     model.opt.timestep = TIME_STEP
 
-    # Dedicated IK state avoids disturbing the live simulation state.
-    model_ik = mj.MjModel.from_xml_path(xml_path)
-    data_ik = mj.MjData(model_ik)
-
     gripper_actuator_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, "gripper")
+    gripper_joint_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "gripper")
 
     data.qpos[:6] = initial_qpos
     mj.mj_forward(model, data)
-    data_ik.qpos[:6] = initial_qpos
-    mj.mj_forward(model_ik, data_ik)
     
-    cup_center, target_rot, approach_axis, radial_dist, base_yaw = compute_side_grasp_pose(model_ik, data_ik)
-    seed_qpos = compute_planar_seed(cup_center, radial_dist, base_yaw)
-
-    pregrasp_offset = CUP_RADIUS + SIDE_PREGRASP_GAP
-    grasp_depth = SIDE_GRASP_DEPTH
-    pregrasp_pos = cup_center - approach_axis * pregrasp_offset
-    grasp_pos = cup_center - approach_axis * grasp_depth
-    lift_pos = grasp_pos + np.array([0.0, 0.0, LIFT_HEIGHT])
-
+    # Initialize IK solver (using 6 DOF for arm only)
+    solver = IKSolver(model, data, n_dof=6, verbose=True)
+    
     print("UR10e Cup Pickup Demo")
-    print(f"Cup center: {cup_center}")
-    print("Using generic_ik_solver.IKSolver for side approach")
-    print(f"Cup radial distance: {radial_dist:.4f} m")
-    print(f"Side approach yaw (joint 1 seed): {base_yaw:.4f} rad ({np.degrees(base_yaw):.2f} deg)")
-    print(f"Approach axis (XY side-on): {approach_axis}")
-
-    pregrasp_qpos, pre_err, pre_ok = solve_pose_ik(model_ik, data_ik, pregrasp_pos, target_rot, seed_qpos)
-    grasp_qpos, grasp_err, grasp_ok = solve_pose_ik(model_ik, data_ik, grasp_pos, target_rot, pregrasp_qpos)
-    lift_qpos, lift_err, lift_ok = solve_pose_ik(model_ik, data_ik, lift_pos, target_rot, grasp_qpos)
-
-    print(f"Pre-grasp IK success={pre_ok}, error={pre_err:.6f}")
-    print(f"Grasp IK success={grasp_ok}, error={grasp_err:.6f}")
-    print(f"Lift IK success={lift_ok}, error={lift_err:.6f}")
-
-    print("Joint targets (radians):")
-    print(f"  pre-grasp: {pregrasp_qpos}")
-    print(f"  grasp:     {grasp_qpos}")
-    print(f"  lift:      {lift_qpos}")
-
-    print("Joint targets (degrees):")
-    print(f"  pre-grasp: {np.degrees(pregrasp_qpos)}")
-    print(f"  grasp:     {np.degrees(grasp_qpos)}")
-    print(f"  lift:      {np.degrees(lift_qpos)}")
-
-    site_id = mj.mj_name2id(model_ik, mj.mjtObj.mjOBJ_SITE, IK_SITE_NAME)
-    for label, q in [("pre-grasp", pregrasp_qpos), ("grasp", grasp_qpos), ("lift", lift_qpos)]:
-        data_ik.qpos[:6] = q
-        mj.mj_forward(model_ik, data_ik)
-        achieved = data_ik.site_xpos[site_id]
-        target = pregrasp_pos if label == "pre-grasp" else grasp_pos if label == "grasp" else lift_pos
-        print(f"{label} position error: {np.linalg.norm(achieved - target):.4f} m")
-
-    APPROACH_PREGRASP = 4.0
-    APPROACH_GRASP = 2.0
-    GRASP_PHASE = 1.5
-    LIFT_PHASE = 3.0
+    print(f"Initial joint positions: {initial_qpos}")
+    print(f"Cup position: {CUP_POS}")
+    print(f"Gripper target (cup centered between fingers): {GRIPPER_TARGET_POS}")
+    
+    # Define target orientation for grasping (gripper approaches cup vertically from above)
+    # This rotation matrix makes the gripper's z-axis point downward for a vertical grip
+    target_orient_pickup = np.array([
+        [0.0,  0.0, 1.0],  # x-axis points forward
+        [1.0,  0.0,  0.0],  # y-axis points left
+        [0.0, 1.0,  0.0]   # z-axis points down
+    ])
+    
+    # Compute IK for cup position with orientation constraint using generic solver
+    print("\nComputing inverse kinematics for pickup position...")
+    data.qpos[:6] = initial_qpos  # Reset to initial configuration
+    result_pickup = solver.solve_ik(target_pos=GRIPPER_TARGET_POS, target_rot_matrix=target_orient_pickup, 
+                                     body_name="gripper", rot_weight=0.2)
+    target_qpos = result_pickup["qpos"][:6].copy()
+    print(f"Target joint positions (IK solution): {target_qpos}")
+    print(f"IK converged: {result_pickup['success']} | Steps: {result_pickup['steps']} | Error: {result_pickup['err_norm']:.6e}")
+    
+    # Verify IK solution reaches cup
+    verify_data = mj.MjData(model)
+    verify_data.qpos[:6] = target_qpos
+    mj.mj_forward(model, verify_data)
+    gripper_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "gripper")
+    if gripper_id >= 0:
+        achieved_pos = verify_data.body(gripper_id).xpos
+        distance_to_target = np.linalg.norm(achieved_pos - GRIPPER_TARGET_POS)
+        distance_to_cup = np.linalg.norm(achieved_pos - CUP_POS)
+        print(f"Gripper position: {achieved_pos}")
+        print(f"Gripper target position: {GRIPPER_TARGET_POS}")
+        print(f"Cup position: {CUP_POS}")
+        print(f"Distance to gripper target: {distance_to_target:.4f}m")
+        print(f"Distance to cup center: {distance_to_cup:.4f}m")
+    
+    # Phase timing
+    SIDE_APPROACH_PHASE = 4.0  # Move to side of cup (pre-grasp position)
+    APPROACH_PHASE = 4.0      # Move forward toward cup to pick it up
+    GRASP_PHASE = 3.5         # Close gripper (extended time for firm grip)
+    LIFT_PHASE = 3.5          # Lift cup (slow and steady)
+    
+    # Compute side approach position (offset to the side of the cup)
+    side_approach_offset = np.array([-0.15, 0.0, 0.0])  # Offset to approach from the side (positive X direction)
+    side_approach_pos = GRIPPER_TARGET_POS + side_approach_offset
+    
+    # Compute IK for side approach position
+    print("\nComputing inverse kinematics for side approach position...")
+    data.qpos[:6] = initial_qpos  # Start from initial position
+    result_side_approach = solver.solve_ik(target_pos=side_approach_pos, target_rot_matrix=target_orient_pickup,
+                                            body_name="gripper", rot_weight=0.2)
+    side_approach_qpos = result_side_approach["qpos"][:6].copy()
+    print(f"Side approach joint positions (IK solution): {side_approach_qpos}")
+    print(f"IK converged: {result_side_approach['success']} | Steps: {result_side_approach['steps']} | Error: {result_side_approach['err_norm']:.6e}")
+    
+    # Verify side approach position
+    verify_data.qpos[:6] = side_approach_qpos
+    mj.mj_forward(model, verify_data)
+    if gripper_id >= 0:
+        achieved_side = verify_data.body(gripper_id).xpos
+        side_distance_to_target = np.linalg.norm(achieved_side - side_approach_pos)
+        print(f"Side approach position achieved: {achieved_side}")
+        print(f"Side approach target: {side_approach_pos}")
+        print(f"Distance to side approach target: {side_distance_to_target:.4f}m")
+    
+    # Compute lift position (cup raised by 0.15m from pickup point)
+    lift_pos = CUP_POS + np.array([0, 0, 0.15])
+    lift_target_pos = GRIPPER_TARGET_POS + np.array([0, 0, 0.15])  # Apply same offset to lift position
+    # Use same orientation as pickup (vertical grip maintained while lifting)
+    print("\nComputing inverse kinematics for lift position...")
+    data.qpos[:6] = target_qpos  # Start from pickup configuration
+    result_lift = solver.solve_ik(target_pos=lift_target_pos, target_rot_matrix=target_orient_pickup, 
+                                   body_name="gripper", rot_weight=0.2)
+    lift_qpos = result_lift["qpos"][:6].copy()
+    print(f"Lift joint positions (IK solution): {lift_qpos}")
+    print(f"IK converged: {result_lift['success']} | Steps: {result_lift['steps']} | Error: {result_lift['err_norm']:.6e}")
+    
+    # Verify lift position
+    verify_data.qpos[:6] = lift_qpos
+    mj.mj_forward(model, verify_data)
+    if gripper_id >= 0:
+        achieved_lift = verify_data.body(gripper_id).xpos
+        lift_distance_to_target = np.linalg.norm(achieved_lift - lift_target_pos)
+        lift_distance_to_cup = np.linalg.norm(achieved_lift - lift_pos)
+        print(f"Lift position achieved: {achieved_lift}")
+        print(f"Lift gripper target: {lift_target_pos}")
+        print(f"Lift cup position: {lift_pos}")
+        print(f"Distance to lift target: {lift_distance_to_target:.4f}m")
+        print(f"Distance to cup center: {lift_distance_to_cup:.4f}m")
+    
+    # Reset data for simulation
+    data.qpos[:6] = initial_qpos
+    mj.mj_forward(model, data)
     
     with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running():
             phase_time = data.time
             
-            # Phase 1: Move to pre-grasp point
-            if phase_time < APPROACH_PREGRASP:
-                alpha = phase_time / APPROACH_PREGRASP
+            # Phase 1: Move to side approach position
+            if phase_time < SIDE_APPROACH_PHASE:
+                alpha = phase_time / SIDE_APPROACH_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
-                desired_qpos = interpolate_qpos(initial_qpos, pregrasp_qpos, smooth_alpha)
-                gripper_goal = GRIPPER_OPEN
-
-            # Phase 2: Move straight into cup centerline
-            elif phase_time < APPROACH_PREGRASP + APPROACH_GRASP:
-                alpha = (phase_time - APPROACH_PREGRASP) / APPROACH_GRASP
-                smooth_alpha = 3 * alpha**2 - 2 * alpha**3
-                desired_qpos = interpolate_qpos(pregrasp_qpos, grasp_qpos, smooth_alpha)
+                desired_qpos = interpolate_qpos(initial_qpos, side_approach_qpos, smooth_alpha)
                 gripper_goal = GRIPPER_OPEN
             
-            # Phase 3: Close gripper on cup
-            elif phase_time < APPROACH_PREGRASP + APPROACH_GRASP + GRASP_PHASE:
-                desired_qpos = grasp_qpos
-                alpha = (phase_time - APPROACH_PREGRASP - APPROACH_GRASP) / GRASP_PHASE
+            # Phase 2: Move from side approach toward cup (approach)
+            elif phase_time < SIDE_APPROACH_PHASE + APPROACH_PHASE:
+                alpha = (phase_time - SIDE_APPROACH_PHASE) / APPROACH_PHASE
+                smooth_alpha = 3 * alpha**2 - 2 * alpha**3
+                desired_qpos = interpolate_qpos(side_approach_qpos, target_qpos, smooth_alpha)
+                gripper_goal = GRIPPER_OPEN
+            
+            # Phase 3: Close gripper
+            elif phase_time < SIDE_APPROACH_PHASE + APPROACH_PHASE + GRASP_PHASE:
+                desired_qpos = target_qpos
+                alpha = (phase_time - SIDE_APPROACH_PHASE - APPROACH_PHASE) / GRASP_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
                 gripper_goal = interpolate_qpos(GRIPPER_OPEN, GRIPPER_CLOSED, smooth_alpha)
             
-            # Phase 4: Lift cup while keeping grasp
+            # Phase 4: Lift cup
             else:
-                alpha = min(1.0, (phase_time - APPROACH_PREGRASP - APPROACH_GRASP - GRASP_PHASE) / LIFT_PHASE)
+                alpha = min(1.0, (phase_time - SIDE_APPROACH_PHASE - APPROACH_PHASE - GRASP_PHASE) / LIFT_PHASE)
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
-                desired_qpos = interpolate_qpos(grasp_qpos, lift_qpos, smooth_alpha)
+                desired_qpos = interpolate_qpos(target_qpos, lift_qpos, smooth_alpha)
                 gripper_goal = GRIPPER_CLOSED
             
             # Compute PD control torques for arm
@@ -258,8 +211,14 @@ def main():
 
             data.ctrl[:6] = torques
             
-            if gripper_actuator_id >= 0:
-                data.ctrl[gripper_actuator_id] = gripper_goal
+            # Gripper PD control
+            if gripper_actuator_id >= 0 and gripper_joint_id >= 0:
+                qpos_adr = model.jnt_qposadr[gripper_joint_id]
+                qvel_adr = model.jnt_dofadr[gripper_joint_id]
+                current_gripper_pos = data.qpos[qpos_adr]
+                current_gripper_vel = data.qvel[qvel_adr] if qvel_adr >= 0 else 0.0
+                gripper_control = pd_control(np.array([gripper_goal]), np.array([current_gripper_pos]), np.array([current_gripper_vel]), KP_GRIPPER, KD_GRIPPER)
+                data.ctrl[gripper_actuator_id] = gripper_control[0]
             
             # Step simulation
             mj.mj_step(model, data)

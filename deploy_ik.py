@@ -21,11 +21,12 @@ SITE_NAME = "attachment_site"
 initial_qpos = np.array([-0.5, -2.5708, 1.2708, -2.0, 1.5708, 0.0])
 
 # Target end-effector pose
-target_pos = np.array([-1.0296, 0.3723, 0.6976])
+target_pos = np.array([-1.0296, 0.3723, 0.15])
+# Horizontal orientation (gripper fingers parallel to ground)
 target_rot_matrix = np.array([
-    [-0.221451, 0.972087, 0.077503],
-    [0.027669, -0.073181, 0.996935],
-    [0.974779, 0.222917, -0.010691]
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1]
 ])
 
 
@@ -46,20 +47,6 @@ def pd_control(desired_qpos, current_qpos, current_qvel, kp, kd):
     pos_error = desired_qpos - current_qpos
     vel_error = -current_qvel
     return kp * pos_error + kd * vel_error
-
-
-def solve_ik_for_target(model, data, target_pos, target_rot_matrix, site_name, n_dof=None):
-    """Solve IK for target pose and return desired joint positions."""
-    solver = IKSolver(model, data, n_dof=n_dof, verbose=False)
-    ik_result = solver.solve_ik(
-        target_pos=target_pos,
-        target_rot_matrix=target_rot_matrix,
-        site_name=site_name,
-        max_steps=100000,
-        tol=1e-8,
-        regularization_strength=3e-2
-    )
-    return ik_result['qpos'][:6], ik_result['err_norm'], ik_result['steps'], ik_result['success']
 
 
 def main():
@@ -83,7 +70,22 @@ def main():
     
     data_dummy.qpos[:6] = initial_qpos
     mj.mj_forward(model_dummy, data_dummy)
-    target_qpos, err_norm, steps, success = solve_ik_for_target(model_dummy, data_dummy, target_pos, target_rot_matrix, SITE_NAME)
+    
+    # Use IKSolver from generic_ik_solver
+    solver = IKSolver(model_dummy, data_dummy, n_dof=6, verbose=True)
+    ik_result = solver.solve_ik(
+        target_pos=target_pos,
+        target_rot_matrix=target_rot_matrix,
+        site_name=SITE_NAME,
+        max_steps=100000,
+        tol=1e-8,
+        regularization_strength=3e-2
+    )
+    
+    target_qpos = ik_result['qpos'][:6]
+    err_norm = ik_result['err_norm']
+    steps = ik_result['steps']
+    success = ik_result['success']
     
     print(f"Target joint positions: {target_qpos}")
     print(f"Error norm: {err_norm}")
