@@ -20,8 +20,8 @@ xml_path = os.path.join(current_dir, "ur10e", "ur10e_custom_gripper_scene.xml")
 TIME_STEP = 0.002
 KP_JOINTS = np.array([300, 250, 90, 100, 70, 100])   # Proportional gains per joint (reduced for smoother motion)
 KD_JOINTS = np.array([5.0, 40.0, 35.0, 40.0, 5.0, 3.5])  
-KP_GRIPPER = 50.0  # Proportional gain for gripper (increased for stronger grip)
-KD_GRIPPER = 5.0   # Derivative gain for gripper (increased for stability)
+KP_GRIPPER = 15.0  # Minimal force for contact only
+KD_GRIPPER = 2.0
 
 # Initial and target joint positions (6 DOF for arm)
 initial_qpos = np.array([-1.5708, -2.0708, 1.2708, -2.0, 1.5708, 0.0])
@@ -31,12 +31,12 @@ CUP_POS = np.array([0.95, 0.05, 0.11])  # Center of cup wall at mid-height - clo
 
 # Gripper finger offset - adjust to position cup between fingers
 # The gripper's moving jaw is offset, so we need to compensate to center the cup
-GRIPPER_FINGER_OFFSET = np.array([0.06, -0.13, 0.0])  # Y-offset to center cup between fingers
+GRIPPER_FINGER_OFFSET = np.array([0.085, -0.139, 0.0])  # Y-offset to center cup between fingers (+0.025m deeper in X)
 GRIPPER_TARGET_POS = CUP_POS + GRIPPER_FINGER_OFFSET  # Target position for gripper approach
 
 # Gripper positions (radians)
 GRIPPER_OPEN = 1.5   # Open position (minimum)
-GRIPPER_CLOSED = 0.2      # Closed position - tight grip
+GRIPPER_CLOSED = 0.8    # Closed position - barely closes, just touches cup
 
 
 def pd_control(desired_qpos, current_qpos, current_qvel, kp, kd):
@@ -115,10 +115,10 @@ def main():
         print(f"Distance to cup center: {distance_to_cup:.4f}m")
     
     # Phase timing
-    SIDE_APPROACH_PHASE = 4.0  # Move to side of cup (pre-grasp position)
-    APPROACH_PHASE = 4.0      # Move forward toward cup to pick it up
-    GRASP_PHASE = 3.5         # Close gripper (extended time for firm grip)
-    LIFT_PHASE = 3.5          # Lift cup (slow and steady)
+    SIDE_APPROACH_PHASE = 2.8  # Move to side of cup (pre-grasp position)
+    APPROACH_PHASE = 2.8      # Move forward toward cup to pick it up
+    GRASP_PHASE = 2.0         # Close gripper
+    LIFT_PHASE = 2.5          # Lift cup
     
     # Compute side approach position (offset to the side of the cup)
     side_approach_offset = np.array([-0.15, 0.0, 0.0])  # Offset to approach from the side (positive X direction)
