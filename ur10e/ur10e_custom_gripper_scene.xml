@@ -15,7 +15,7 @@
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
-    <mesh name="solo_cup_mesh" file="Red_cup.STL" scale="1 1 1"/>
+    <mesh name="solo_cup_mesh" file="Red_cup.STL" scale="0.001 0.001 0.001"/>
   </asset>
 
   <worldbody>
@@ -26,10 +26,10 @@
           solimp="0.9 0.95 0.001"/>
     
     <!-- Solo Cup positioned next to robot -->
-    <body name="solo_cup" pos="1.00 0.0 0.07">
-      <inertial pos="0 0 0.035" mass="0.5" diaginertia="0.0006 0.0006 0.0006" />
+    <body name="solo_cup" pos="1.00 0.0 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0 0 0.02" mass="0.5" diaginertia="0.0006 0.0006 0.0006" />
       <joint type="free" damping="0.2" />
-      <geom name="cup_mesh" type="mesh" mesh="solo_cup_mesh" pos="0 0 0.035" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 1.2 0.8" />
+      <geom name="cup_mesh" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 1.2 0.8" />
     </body>
   </worldbody>
 
