@@ -31,12 +31,12 @@ CUP_POS = np.array([0.95, 0.05, 0.11])  # Center of cup wall at mid-height - clo
 
 # Gripper finger offset - adjust to position cup between fingers
 # The gripper's moving jaw is offset, so we need to compensate to center the cup
-GRIPPER_FINGER_OFFSET = np.array([0.08, -0.143, 0])  # Y-offset to center cup between fingers (+0.025m deeper in X)
+GRIPPER_FINGER_OFFSET = np.array([0.13, -0.2, 0])  # Y-offset to center cup between fingers (+0.025m deeper in X)
 GRIPPER_TARGET_POS = CUP_POS + GRIPPER_FINGER_OFFSET  # Target position for gripper approach
 
 # Gripper positions (radians)
-GRIPPER_OPEN = 1.0   # Open position (minimum)
-GRIPPER_CLOSED = 0.45    # Closed position - barely closes, just touches cup
+GRIPPER_OPEN = 1.5   # Open position (minimum)
+GRIPPER_CLOSED = 0.9    # Closed position - barely closes, just touches cup
 
 
 def pd_control(desired_qpos, current_qpos, current_qvel, kp, kd):
@@ -250,9 +250,14 @@ def main():
     data.qpos[:6] = initial_qpos
     mj.mj_forward(model, data)
     
+    # Get cup body ID
+    cup_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "solo_cup")
+    gripper_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "gripper")
+    
     with mujoco.viewer.launch_passive(model, data) as viewer:
         cup_idx = 0  # Current cup being placed
         start_time = 0.0  # Track time for each cup placement
+        cup_weld_id = -1  # Track weld constraint ID
         
         while viewer.is_running() and cup_idx < len(pyramid_positions):
             # Time since start of current cup placement
@@ -278,6 +283,11 @@ def main():
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
                 desired_qpos = interpolate_qpos(initial_qpos, side_approach_qpos, smooth_alpha)
                 gripper_goal = GRIPPER_OPEN
+                
+                # Remove weld if it exists
+                if cup_weld_id >= 0:
+                    data.eq_active[cup_weld_id] = 0
+                    cup_weld_id = -1
             
             # Phase 2: Move from side approach toward cup (approach)
             elif phase_time < phase_2_end:
@@ -286,14 +296,25 @@ def main():
                 desired_qpos = interpolate_qpos(side_approach_qpos, target_qpos, smooth_alpha)
                 gripper_goal = GRIPPER_OPEN
             
-            # Phase 3: Close gripper
+            # Phase 3: Close gripper and create weld on contact
             elif phase_time < phase_3_end:
                 desired_qpos = target_qpos
                 alpha = (phase_time - phase_2_end) / GRASP_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
                 gripper_goal = interpolate_qpos(GRIPPER_OPEN, GRIPPER_CLOSED, smooth_alpha)
+                
+                # Create weld constraint if not already created and gripper is mostly closed
+                if cup_weld_id < 0 and gripper_goal < GRIPPER_CLOSED + 0.05:
+                    # Add weld constraint between gripper and cup
+                    cup_weld_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_EQUALITY, "weld_cup")
+                    if cup_weld_id >= 0:
+                        data.eq_active[cup_weld_id] = 1
+                    else:
+                        # If no predefined weld, try to create one dynamically
+                        # For now, we'll use high damping on the cup to simulate sticking
+                        data.qvel[cup_body_id * 6: cup_body_id * 6 + 6] = 0
             
-            # Phase 4: Lift cup
+            # Phase 4: Lift cup (cup should stick via weld)
             elif phase_time < phase_4_end:
                 alpha = (phase_time - phase_3_end) / LIFT_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
@@ -320,6 +341,11 @@ def main():
                 alpha = (phase_time - phase_6_end) / RELEASE_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
                 gripper_goal = interpolate_qpos(GRIPPER_CLOSED, GRIPPER_OPEN, smooth_alpha)
+                
+                # Disable weld when opening gripper
+                if cup_weld_id >= 0:
+                    data.eq_active[cup_weld_id] = 0
+                    cup_weld_id = -1
             
             # Phase 8: Return to side approach for next cup
             elif phase_time < phase_8_end:
