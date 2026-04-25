@@ -87,8 +87,4 @@
     </body>
   </worldbody>
 
-  <equality>
-    <weld name="weld_cup" body1="gripper" body2="solo_cup_1" active="false"/>
-  </equality>
-
 </mujoco>

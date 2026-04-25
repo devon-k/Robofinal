@@ -26,13 +26,23 @@ KD_GRIPPER = 2.0
 # Initial and target joint positions (6 DOF for arm)
 initial_qpos = np.array([-1.5708, -2.0708, 1.2708, -2.0, 1.5708, 0.0])
 
-# Cup position (where we want to pick it up)
-CUP_POS = np.array([0.95, 0.05, 0.11])  # Center of cup wall at mid-height - closer to robot
+# Cup starting positions in workspace (from XML)
+CUP_POSITIONS = [
+    np.array([1.00, 0.0, 0.11]),    # Cup 1
+    np.array([1.00, 0.15, 0.11]),   # Cup 2
+    np.array([1.00, 0.3, 0.11]),    # Cup 3
+    np.array([1.00, 0.45, 0.11]),   # Cup 4
+    np.array([1.00, 0.6, 0.11]),    # Cup 5
+    np.array([1.15, 0.0, 0.11]),    # Cup 6
+    np.array([1.15, 0.15, 0.11]),   # Cup 7
+    np.array([1.15, 0.3, 0.11]),    # Cup 8
+    np.array([1.15, 0.45, 0.11]),   # Cup 9
+    np.array([1.15, 0.6, 0.11]),    # Cup 10
+]
 
 # Gripper finger offset - adjust to position cup between fingers
 # The gripper's moving jaw is offset, so we need to compensate to center the cup
-GRIPPER_FINGER_OFFSET = np.array([0.13, -0.2, 0])  # Y-offset to center cup between fingers (+0.025m deeper in X)
-GRIPPER_TARGET_POS = CUP_POS + GRIPPER_FINGER_OFFSET  # Target position for gripper approach
+GRIPPER_FINGER_OFFSET = np.array([0.13, -0.2, 0])  # Y-offset to center cup between fingers
 
 # Gripper positions (radians)
 GRIPPER_OPEN = 1.5   # Open position (minimum)
@@ -120,8 +130,7 @@ def main():
     
     print("UR10e Cup Pickup Demo")
     print(f"Initial joint positions: {initial_qpos}")
-    print(f"Cup position: {CUP_POS}")
-    print(f"Gripper target (cup centered between fingers): {GRIPPER_TARGET_POS}")
+    print(f"Number of cups to pick: {len(CUP_POSITIONS)}")
     
     # Define target orientation for grasping (gripper approaches cup vertically from above)
     # This rotation matrix makes the gripper's z-axis point downward for a vertical grip
@@ -131,115 +140,87 @@ def main():
         [0.0, 1.0,  0.0]   # z-axis points down
     ])
     
-    # Compute IK for cup position with orientation constraint using generic solver
-    print("\nComputing inverse kinematics for pickup position...")
-    data.qpos[:6] = initial_qpos  # Reset to initial configuration
-    result_pickup = solver.solve_ik(target_pos=GRIPPER_TARGET_POS, target_rot_matrix=target_orient_pickup, 
-                                     body_name="gripper", rot_weight=0.2)
-    target_qpos = result_pickup["qpos"][:6].copy()
-    print(f"Target joint positions (IK solution): {target_qpos}")
-    print(f"IK converged: {result_pickup['success']} | Steps: {result_pickup['steps']} | Error: {result_pickup['err_norm']:.6e}")
+    # Pre-compute approach and pickup IK solutions for each cup
+    print("\nComputing inverse kinematics for all cup positions...")
+    side_approach_qpos_list = []
+    target_qpos_list = []
+    lift_qpos_list = []
     
-    # Verify IK solution reaches cup
-    verify_data = mj.MjData(model)
-    verify_data.qpos[:6] = target_qpos
-    mj.mj_forward(model, verify_data)
-    gripper_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "gripper")
-    if gripper_id >= 0:
-        achieved_pos = verify_data.body(gripper_id).xpos
-        distance_to_target = np.linalg.norm(achieved_pos - GRIPPER_TARGET_POS)
-        distance_to_cup = np.linalg.norm(achieved_pos - CUP_POS)
-        print(f"Gripper position: {achieved_pos}")
-        print(f"Gripper target position: {GRIPPER_TARGET_POS}")
-        print(f"Cup position: {CUP_POS}")
-        print(f"Distance to gripper target: {distance_to_target:.4f}m")
-        print(f"Distance to cup center: {distance_to_cup:.4f}m")
-    
-    # Phase timing
-    SIDE_APPROACH_PHASE = 2.8  # Move to side of cup (pre-grasp position)
-    APPROACH_PHASE = 2.8      # Move forward toward cup to pick it up
-    GRASP_PHASE = 2.0         # Close gripper
-    LIFT_PHASE = 2.5          # Lift cup
-    MOVE_TO_PLACE_PHASE = 3.0 # Move to placement location
-    LOWER_PHASE = 2.0         # Lower cup to placement position
-    RELEASE_PHASE = 1.5       # Open gripper to release
-    RETURN_PHASE = 2.5        # Return to side approach for next cup
-    
-    # Compute side approach position (offset to the side of the cup)
-    side_approach_offset = np.array([-0.15, 0.0, 0.0])  # Offset to approach from the side (positive X direction)
-    side_approach_pos = GRIPPER_TARGET_POS + side_approach_offset
-    
-    # Compute IK for side approach position
-    print("\nComputing inverse kinematics for side approach position...")
-    data.qpos[:6] = initial_qpos  # Start from initial position
-    result_side_approach = solver.solve_ik(target_pos=side_approach_pos, target_rot_matrix=target_orient_pickup,
-                                            body_name="gripper", rot_weight=0.2)
-    side_approach_qpos = result_side_approach["qpos"][:6].copy()
-    print(f"Side approach joint positions (IK solution): {side_approach_qpos}")
-    print(f"IK converged: {result_side_approach['success']} | Steps: {result_side_approach['steps']} | Error: {result_side_approach['err_norm']:.6e}")
-    
-    # Verify side approach position
-    verify_data.qpos[:6] = side_approach_qpos
-    mj.mj_forward(model, verify_data)
-    if gripper_id >= 0:
-        achieved_side = verify_data.body(gripper_id).xpos
-        side_distance_to_target = np.linalg.norm(achieved_side - side_approach_pos)
-        print(f"Side approach position achieved: {achieved_side}")
-        print(f"Side approach target: {side_approach_pos}")
-        print(f"Distance to side approach target: {side_distance_to_target:.4f}m")
-    
-    # Compute lift position (cup raised by 0.15m from pickup point)
-    lift_pos = CUP_POS + np.array([0, 0, 0.15])
-    lift_target_pos = GRIPPER_TARGET_POS + np.array([0, 0, 0.15])  # Apply same offset to lift position
-    # Use same orientation as pickup (vertical grip maintained while lifting)
-    print("\nComputing inverse kinematics for lift position...")
-    data.qpos[:6] = target_qpos  # Start from pickup configuration
-    result_lift = solver.solve_ik(target_pos=lift_target_pos, target_rot_matrix=target_orient_pickup, 
-                                   body_name="gripper", rot_weight=0.2)
-    lift_qpos = result_lift["qpos"][:6].copy()
-    print(f"Lift joint positions (IK solution): {lift_qpos}")
-    print(f"IK converged: {result_lift['success']} | Steps: {result_lift['steps']} | Error: {result_lift['err_norm']:.6e}")
-    
-    # Verify lift position
-    verify_data.qpos[:6] = lift_qpos
-    mj.mj_forward(model, verify_data)
-    if gripper_id >= 0:
-        achieved_lift = verify_data.body(gripper_id).xpos
-        lift_distance_to_target = np.linalg.norm(achieved_lift - lift_target_pos)
-        lift_distance_to_cup = np.linalg.norm(achieved_lift - lift_pos)
-        print(f"Lift position achieved: {achieved_lift}")
-        print(f"Lift gripper target: {lift_target_pos}")
-        print(f"Lift cup position: {lift_pos}")
-        print(f"Distance to lift target: {lift_distance_to_target:.4f}m")
-        print(f"Distance to cup center: {lift_distance_to_cup:.4f}m")
+    for cup_num, cup_pos in enumerate(CUP_POSITIONS):
+        print(f"\n--- Cup {cup_num + 1} ---")
+        cup_target = cup_pos + GRIPPER_FINGER_OFFSET
+        print(f"Cup position: {cup_pos}, Gripper target: {cup_target}")
+        
+        # Side approach position (offset to the side of the cup)
+        side_approach_offset = np.array([-0.15, 0.0, 0.0])
+        side_approach_pos = cup_target + side_approach_offset
+        
+        # Compute IK for side approach
+        data.qpos[:6] = initial_qpos
+        result_side = solver.solve_ik(target_pos=side_approach_pos, target_rot_matrix=target_orient_pickup,
+                                       body_name="gripper", rot_weight=0.2)
+        side_approach_qpos_list.append(result_side["qpos"][:6].copy())
+        if result_side["success"]:
+            print(f"  Side approach: IK converged | Error: {result_side['err_norm']:.6e}")
+        else:
+            print(f"  Side approach: IK FAILED | Error: {result_side['err_norm']:.6e}")
+        
+        # Compute IK for pickup position
+        data.qpos[:6] = initial_qpos
+        result_pickup = solver.solve_ik(target_pos=cup_target, target_rot_matrix=target_orient_pickup,
+                                        body_name="gripper", rot_weight=0.2)
+        target_qpos_list.append(result_pickup["qpos"][:6].copy())
+        if result_pickup["success"]:
+            print(f"  Pickup: IK converged | Error: {result_pickup['err_norm']:.6e}")
+        else:
+            print(f"  Pickup: IK FAILED | Error: {result_pickup['err_norm']:.6e}")
+        
+        # Compute IK for lift position
+        lift_target = cup_target + np.array([0, 0, 0.15])
+        data.qpos[:6] = result_pickup["qpos"][:6]
+        result_lift = solver.solve_ik(target_pos=lift_target, target_rot_matrix=target_orient_pickup,
+                                      body_name="gripper", rot_weight=0.2)
+        lift_qpos_list.append(result_lift["qpos"][:6].copy())
+        if result_lift["success"]:
+            print(f"  Lift: IK converged | Error: {result_lift['err_norm']:.6e}")
+        else:
+            print(f"  Lift: IK FAILED | Error: {result_lift['err_norm']:.6e}")
     
     # Generate pyramid positions for placing cups
     print("\nGenerating pyramid positions...")
-    pyramid_base = np.array([0.5, -0.4, 0.07])  # Base of pyramid
-    pyramid_positions = calculate_pyramid_positions(pyramid_base, spacing=0.065, z_offset=0.07)
+    pyramid_base = np.array([0.5, -0.4, 0.17])  # Base of pyramid (z=0.02 for cups resting on floor)
+    pyramid_positions = calculate_pyramid_positions(pyramid_base, spacing=0.055, z_offset=0.1)
     print(f"Pyramid positions: {len(pyramid_positions)} cups")
     
     # Compute IK solutions for all placement positions
     print("\nComputing IK solutions for placement positions...")
     placement_qpos_list = []
     placement_lower_qpos_list = []
+    retreat_qpos_list = []
     
     for idx, pyramid_pos in enumerate(pyramid_positions):
         # Placement target with gripper offset applied
         placement_target = pyramid_pos + GRIPPER_FINGER_OFFSET
         
         # IK for placement position (at full height)
-        data.qpos[:6] = lift_qpos  # Start from lifted position
+        data.qpos[:6] = lift_qpos_list[idx]  # Start from this cup's lifted position
         result_placement = solver.solve_ik(target_pos=placement_target, target_rot_matrix=target_orient_pickup,
                                            body_name="gripper", rot_weight=0.2)
         placement_qpos_list.append(result_placement["qpos"][:6].copy())
         
         # IK for lowered position (0.08m lower for contact with surface)
         lower_target = placement_target - np.array([0, 0, 0.08])
-        data.qpos[:6] = lift_qpos
+        data.qpos[:6] = lift_qpos_list[idx]
         result_lower = solver.solve_ik(target_pos=lower_target, target_rot_matrix=target_orient_pickup,
                                        body_name="gripper", rot_weight=0.2)
         placement_lower_qpos_list.append(result_lower["qpos"][:6].copy())
+        
+        # IK for retreat position (high above pyramid, away from placement area)
+        retreat_target = placement_target + np.array([-0.2, 0, 0.2])  # Move back and up
+        data.qpos[:6] = placement_lower_qpos_list[idx]
+        result_retreat = solver.solve_ik(target_pos=retreat_target, target_rot_matrix=target_orient_pickup,
+                                        body_name="gripper", rot_weight=0.2)
+        retreat_qpos_list.append(result_retreat["qpos"][:6].copy())
         
         if result_placement["success"]:
             print(f"  Cup {idx+1}: Placement IK converged | Error: {result_placement['err_norm']:.6e}")
@@ -250,14 +231,22 @@ def main():
     data.qpos[:6] = initial_qpos
     mj.mj_forward(model, data)
     
-    # Get cup body ID
-    cup_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "solo_cup")
+    # Phase timing
+    SIDE_APPROACH_PHASE = 2.8  # Move to side of cup (pre-grasp position)
+    APPROACH_PHASE = 2.8      # Move forward toward cup to pick it up
+    GRASP_PHASE = 2.0         # Close gripper
+    LIFT_PHASE = 2.5          # Lift cup
+    MOVE_TO_PLACE_PHASE = 3.0 # Move to placement location
+    LOWER_PHASE = 2.0         # Lower cup to placement position
+    RELEASE_PHASE = 1.5       # Open gripper to release
+    RETREAT_PHASE = 2.0       # Retreat away from pyramid after releasing
+    
+    # Get gripper body ID (cup IDs will vary per iteration)
     gripper_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "gripper")
     
     with mujoco.viewer.launch_passive(model, data) as viewer:
-        cup_idx = 0  # Current cup being placed
+        cup_idx = 0  # Current cup being picked (1-10)
         start_time = 0.0  # Track time for each cup placement
-        cup_weld_id = -1  # Track weld constraint ID
         
         while viewer.is_running() and cup_idx < len(pyramid_positions):
             # Time since start of current cup placement
@@ -271,11 +260,15 @@ def main():
             phase_5_end = phase_4_end + MOVE_TO_PLACE_PHASE
             phase_6_end = phase_5_end + LOWER_PHASE
             phase_7_end = phase_6_end + RELEASE_PHASE
-            phase_8_end = phase_7_end + RETURN_PHASE
+            phase_8_end = phase_7_end + RETREAT_PHASE
             
-            # Get placement positions for current cup
+            # Get positions for current cup
             placement_qpos = placement_qpos_list[cup_idx]
             placement_lower_qpos = placement_lower_qpos_list[cup_idx]
+            retreat_qpos = retreat_qpos_list[cup_idx]
+            side_approach_qpos = side_approach_qpos_list[cup_idx]
+            target_qpos = target_qpos_list[cup_idx]
+            lift_qpos = lift_qpos_list[cup_idx]
             
             # Phase 1: Move to side approach position
             if phase_time < phase_1_end:
@@ -283,11 +276,6 @@ def main():
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
                 desired_qpos = interpolate_qpos(initial_qpos, side_approach_qpos, smooth_alpha)
                 gripper_goal = GRIPPER_OPEN
-                
-                # Remove weld if it exists
-                if cup_weld_id >= 0:
-                    data.eq_active[cup_weld_id] = 0
-                    cup_weld_id = -1
             
             # Phase 2: Move from side approach toward cup (approach)
             elif phase_time < phase_2_end:
@@ -296,25 +284,14 @@ def main():
                 desired_qpos = interpolate_qpos(side_approach_qpos, target_qpos, smooth_alpha)
                 gripper_goal = GRIPPER_OPEN
             
-            # Phase 3: Close gripper and create weld on contact
+            # Phase 3: Close gripper
             elif phase_time < phase_3_end:
                 desired_qpos = target_qpos
                 alpha = (phase_time - phase_2_end) / GRASP_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
                 gripper_goal = interpolate_qpos(GRIPPER_OPEN, GRIPPER_CLOSED, smooth_alpha)
-                
-                # Create weld constraint if not already created and gripper is mostly closed
-                if cup_weld_id < 0 and gripper_goal < GRIPPER_CLOSED + 0.05:
-                    # Add weld constraint between gripper and cup
-                    cup_weld_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_EQUALITY, "weld_cup")
-                    if cup_weld_id >= 0:
-                        data.eq_active[cup_weld_id] = 1
-                    else:
-                        # If no predefined weld, try to create one dynamically
-                        # For now, we'll use high damping on the cup to simulate sticking
-                        data.qvel[cup_body_id * 6: cup_body_id * 6 + 6] = 0
             
-            # Phase 4: Lift cup (cup should stick via weld)
+            # Phase 4: Lift cup (gripper holds via friction)
             elif phase_time < phase_4_end:
                 alpha = (phase_time - phase_3_end) / LIFT_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
@@ -341,24 +318,19 @@ def main():
                 alpha = (phase_time - phase_6_end) / RELEASE_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
                 gripper_goal = interpolate_qpos(GRIPPER_CLOSED, GRIPPER_OPEN, smooth_alpha)
-                
-                # Disable weld when opening gripper
-                if cup_weld_id >= 0:
-                    data.eq_active[cup_weld_id] = 0
-                    cup_weld_id = -1
             
-            # Phase 8: Return to side approach for next cup
+            # Phase 8: Retreat away from pyramid (up and back)
             elif phase_time < phase_8_end:
-                alpha = (phase_time - phase_7_end) / RETURN_PHASE
+                alpha = (phase_time - phase_7_end) / RETREAT_PHASE
                 smooth_alpha = 3 * alpha**2 - 2 * alpha**3
-                desired_qpos = interpolate_qpos(placement_lower_qpos, side_approach_qpos, smooth_alpha)
+                desired_qpos = interpolate_qpos(placement_lower_qpos, retreat_qpos, smooth_alpha)
                 gripper_goal = GRIPPER_OPEN
             
             # Move to next cup
             else:
+                print(f"✓ Placed cup {cup_idx + 1}/10")
                 cup_idx += 1
                 start_time = data.time
-                print(f"Placed cup {cup_idx}/{len(pyramid_positions)}")
                 continue
             
             # Compute PD control torques for arm
@@ -381,7 +353,7 @@ def main():
             mj.mj_step(model, data)
             viewer.sync()
     
-    print(f"Placed all {len(pyramid_positions)} cups in pyramid!")
+    print(f"✓ Successfully placed all 10 cups in pyramid formation!")
 
 
 if __name__ == "__main__":
