@@ -26,15 +26,69 @@
           solimp="0.9 0.95 0.001"/>
     
     <!-- Solo Cup positioned next to robot -->
-    <body name="solo_cup" pos="1.00 0.0 0.02" quat="0.707 0.707 0 0">
+    <body name="solo_cup_1" pos="1.00 0.0 0.02" quat="0.707 0.707 0 0">
       <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
       <joint type="free" damping="0.05" />
-      <geom name="cup_mesh" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+      <geom name="cup_mesh_1" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+    <body name="solo_cup_2" pos="1.00 0.15 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_2" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+    <body name="solo_cup_3" pos="1.00 0.3 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_3" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+    <body name="solo_cup_4" pos="1.00 0.45 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_4" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+    <body name="solo_cup_5" pos="1.00 0.6 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_5" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+  <body name="solo_cup_6" pos="1.15 0.0 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_6" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+    <body name="solo_cup_7" pos="1.15 0.15 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_7" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>s
+
+    <body name="solo_cup_8" pos="1.15 0.3 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_8" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+    <body name="solo_cup_9" pos="1.15 0.45 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_9" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
+    </body>
+
+    <body name="solo_cup_10" pos="1.15 0.6 0.02" quat="0.707 0.707 0 0">
+      <inertial pos="0.05 0.003 0.05" mass="0.01" diaginertia="0.015 0.003 0.015" />
+      <joint type="free" damping="0.05" />
+      <geom name="cup_mesh_10" type="mesh" mesh="solo_cup_mesh" pos="0 0 0" rgba="0.98 0.13 0.10 1" contype="1" conaffinity="3" friction="2.0 2.0 2.0" />
     </body>
   </worldbody>
 
   <equality>
-    <weld name="weld_cup" body1="gripper" body2="solo_cup" active="false"/>
+    <weld name="weld_cup" body1="gripper" body2="solo_cup_1" active="false"/>
   </equality>
 
 </mujoco>
